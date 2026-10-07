@@ -72,15 +72,23 @@ def _hash(prev: str, ts: str, tipo: str, dados: str) -> str:
 
 
 class Ledger:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, fast: bool = False):
+        """fast=True desliga o fsync a cada gravação. Só para backtests, onde perder o
+        arquivo numa queda de energia não importa; em operação real fica False."""
         self.path = str(path)
         self.db = sqlite3.connect(self.path)
+        if fast:
+            self.db.execute("PRAGMA synchronous=OFF")
+            self.db.execute("PRAGMA journal_mode=MEMORY")
         self.db.executescript(_SCHEMA)
+        self._last: str | None = None
 
     def close(self) -> None:
         self.db.close()
 
     def _last_hash(self) -> str:
+        if self._last is not None:
+            return self._last
         row = self.db.execute("SELECT hash FROM eventos ORDER BY seq DESC LIMIT 1").fetchone()
         return row[0] if row else GENESIS
 
@@ -94,6 +102,7 @@ class Ledger:
                 "INSERT INTO eventos (ts, tipo, dados, hash_anterior, hash) VALUES (?,?,?,?,?)",
                 (ts_s, tipo, payload, prev, h),
             )
+        self._last = h
         return h
 
     def record_fiscal(self, fill: Fill, avg_cost_after: Decimal, realized: Decimal) -> None:

@@ -11,11 +11,11 @@ cd codigo
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest                                  # 40 testes
+pytest                                  # 42 testes
 agente-crypto backtest --sintetico      # roda sem internet, com preços aleatórios
 agente-crypto baixar --dias 180         # baixa candles reais de BTC/BRL do Mercado Bitcoin (API pública)
 agente-crypto backtest                  # roda a estratégia de config/strategy.yaml sobre os dados
-agente-crypto estudo                    # compara 16 configurações separando treino e validação
+agente-crypto estudo                    # compara 32 configurações (16 conservadoras, 16 de swing) com treino e validação
 agente-crypto verificar dados/backtest/backtest.sqlite   # confere se a auditoria foi adulterada
 agente-crypto kill "motivo"             # liga o kill switch
 ```
@@ -33,7 +33,7 @@ dados (MB público) -> estratégia -> OrderIntent -> MOTOR DE RISCO -> ApprovedO
 | Arquivo | Papel |
 |---|---|
 | `config/risk_limits.yaml` | Limites rígidos. Só mudam editando o arquivo e reiniciando. O hash dele vai gravado em cada decisão. |
-| `config/strategy.yaml` | Estratégia de exemplo (médias móveis), timeframe, tipo de ordem (maker/taker), taxas e capital simulado. |
+| `config/strategy.yaml` | Tipo de estratégia (`tendencia` ou `swing`), parâmetros, timeframe, tipo de ordem (maker/taker), taxas e capital simulado. |
 | `src/agente_crypto/estudo.py` | Testa várias configurações: escolhe a melhor nos primeiros 60% dos dados e confere nos últimos 40%. |
 | `src/agente_crypto/risk.py` | Função pura, sem rede e sem IA. É o único lugar que cria `ApprovedOrder`. |
 | `src/agente_crypto/execution/` | O executor só aceita `ApprovedOrder`. A interface **não tem** método de saque nem de transferência. |
@@ -58,6 +58,13 @@ dados (MB público) -> estratégia -> OrderIntent -> MOTOR DE RISCO -> ApprovedO
 - No máximo 4 ordens por hora
 - Preço limite até 0,5% longe do mercado; spread acima de 1% ou dado mais velho que 5 min bloqueiam tudo
 - Só BTC/BRL e ETH/BRL, só spot, sem alavancagem e sem venda a descoberto
+
+## As duas estratégias
+
+- **Conservadora (`tendencia`):** fica comprada enquanto a média curta estiver acima da longa, em candles de 4h ou de 1 dia. Opera pouco.
+- **Trade ativo (`swing`):** compra quando o preço cai X% abaixo da média recente e vende quando ele volta à média. Tem stop de 5% abaixo do custo, que usa ordem agressiva para garantir a saída. Roda em candles de 1h ou 4h e opera muito mais.
+
+O `estudo` testa as duas famílias e mostra, lado a lado, a melhor de cada uma (escolhida no treino) e como ela se saiu na validação, já descontando as taxas.
 
 ## Como ler o backtest
 

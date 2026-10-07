@@ -15,7 +15,7 @@ from .execution.paper import PaperExchange
 from .killswitch import KillSwitch
 from .ledger import Ledger
 from .portfolio import Portfolio
-from .strategy import SmaCross
+from .strategy import make_strategy
 
 DEFAULT_SPREAD_PCT = Decimal("0.10")
 
@@ -64,7 +64,12 @@ class BacktestReport:
 
 
 def describe(cfg: StrategyConfig) -> str:
-    return (f"médias {cfg.fast}/{cfg.slow} em candles de {cfg.timeframe}, ordens {cfg.fees.order_type}"
+    if cfg.kind == "swing":
+        regra = (f"swing: compra {cfg.entry_drop_pct}% abaixo da média de {cfg.slow} candles,"
+                 f" vende na média, stop {cfg.stop_loss_pct}%")
+    else:
+        regra = f"tendência: médias {cfg.fast}/{cfg.slow}"
+    return (f"{regra}, candles de {cfg.timeframe}, ordens {cfg.fees.order_type}"
             f" (taxa {cfg.fees.maker_pct if cfg.fees.order_type == 'maker' else cfg.fees.taker_pct}%),"
             f" R$ {cfg.order_brl} por ordem")
 
@@ -88,11 +93,12 @@ def run_backtest(
     if kill.path.exists():
         kill.path.unlink()
 
-    ledger = Ledger(db)
+    ledger = Ledger(db, fast=True)
     cash = cfg.initial_cash_brl
     exchange = PaperExchange(cfg.fees, {"BRL": cash})
     portfolio = Portfolio(cash_brl=cash)
-    strategy = SmaCross(cfg)
+    strategy = make_strategy(cfg)
+    window = strategy.warmup + 1  # a estratégia só precisa dos últimos candles
     engine = TradingEngine(strategy, limits, exchange, ledger, kill, portfolio)
     asset = base_asset(cfg.symbol)
 
@@ -103,7 +109,7 @@ def run_backtest(
         exchange.process_candle(cfg.symbol, candles[i])
         snap = snapshot_from_candle(cfg.symbol, candles[i], cfg.timeframe, spread_pct)
         exchange.update_market(snap)
-        engine.step(candles[: i + 1], snap, now=snap.ts)
+        engine.step(candles[max(0, i + 1 - window): i + 1], snap, now=snap.ts)
         eq = portfolio.equity({asset: snap.last})
         held_value = portfolio.qty(asset) * snap.last
         exposure_sum += held_value / eq * 100

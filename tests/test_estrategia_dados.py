@@ -6,7 +6,7 @@ from agente_crypto.data import resample, synthetic_candles
 from agente_crypto.domain import Fill, Side
 from agente_crypto.estudo import run_estudo, vantagem
 from agente_crypto.portfolio import Portfolio
-from agente_crypto.strategy import SmaCross
+from agente_crypto.strategy import SmaCross, Swing
 
 from conftest import NOW
 
@@ -39,9 +39,47 @@ def test_venda_em_partes_quando_posicao_passa_do_limite_por_ordem(cfg):
 def test_estudo_sintetico_roda_e_separa_treino_e_validacao(tmp_path, cfg, limits):
     hs = synthetic_candles(24 * 200, seed=11)
     linhas, texto = run_estudo(hs, cfg, limits, tmp_path)
-    assert linhas and "Melhor no treino" in texto
+    assert linhas and "LADO A LADO" in texto
+    assert "Conservadora (tendência)" in texto and "Trade ativo (swing)" in texto
+    assert {c.kind for c, _, _ in linhas} == {"tendencia", "swing"}
     # ordenado pela vantagem no treino
     vs = [vantagem(t) for _, t, _ in linhas]
     assert vs == sorted(vs, reverse=True)
     for _, t, v in linhas:
         assert t.cadeia_integra and v.cadeia_integra and v.kill_switch is None
+
+
+
+def _flat_then(last_price, n=24, base=100000):
+    hs = synthetic_candles(n, start_price=base, vol_per_step=0.0)
+    from agente_crypto.domain import Candle
+    c = hs[-1]
+    p = Decimal(last_price)
+    hs[-1] = Candle(c.ts, p, p, p, p, c.volume)
+    return hs
+
+
+def swing_cfg(cfg, order_type="maker"):
+    return dataclasses.replace(cfg, kind="swing", timeframe="1h", slow=24, entry_drop_pct=Decimal("3"),
+                               stop_loss_pct=Decimal("5"),
+                               fees=dataclasses.replace(cfg.fees, order_type=order_type))
+
+
+def test_swing_compra_queda_forte_e_ignora_queda_pequena(cfg):
+    s = Swing(swing_cfg(cfg))
+    vazio = Portfolio(cash_brl=Decimal("5000"))
+    assert s.decide(_flat_then("98000"), vazio) is None  # caiu 2%, gatilho é 3%
+    i = s.decide(_flat_then("95000"), vazio)
+    assert i.side is Side.BUY and i.limit_price == Decimal("95000.00")  # maker: no último preço
+
+
+def test_swing_vende_no_alvo_e_no_stop(cfg):
+    s = Swing(swing_cfg(cfg))
+    p = Portfolio(cash_brl=Decimal("0"))
+    p.apply_fill(Fill("o", "BTC/BRL", Side.BUY, Decimal("0.005"), Decimal("95000"), Decimal(0), NOW, "x"))
+    assert s.decide(_flat_then("97000"), p) is None  # ainda abaixo da média, acima do stop
+    alvo = s.decide(_flat_then("100500"), p)
+    assert alvo.side is Side.SELL and alvo.reason.startswith("alvo")
+    stop = s.decide(_flat_then("90000"), p)  # custo 95000, stop 5% = 90250
+    assert stop.side is Side.SELL and stop.reason.startswith("stop")
+    assert stop.limit_price < Decimal("90000")  # stop é agressivo para garantir a saída

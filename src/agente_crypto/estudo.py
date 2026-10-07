@@ -21,9 +21,16 @@ from .config import RiskLimits, StrategyConfig
 from .data import TIMEFRAMES, resample
 from .domain import Candle
 
-TIMEFRAMES_TESTADOS = ["4h", "1d"]
-MEDIAS = [(5, 20), (10, 30), (10, 50), (20, 50)]
 TIPOS_ORDEM = ["maker", "taker"]
+# Conservadora: segue a tendência, opera pouco.
+TENDENCIA_TIMEFRAMES = ["4h", "1d"]
+MEDIAS = [(5, 20), (10, 30), (10, 50), (20, 50)]
+# Swing (trade ativo): compra quedas e vende na volta à média, com stop de 5%.
+SWING_TIMEFRAMES = ["1h", "4h"]
+SWING_JANELAS = [24, 48]          # média de N candles
+SWING_QUEDAS = [Decimal("2"), Decimal("4")]  # % abaixo da média para comprar
+SWING_STOP = Decimal("5")
+TIMEFRAMES_TESTADOS = sorted(set(TENDENCIA_TIMEFRAMES + SWING_TIMEFRAMES))
 FRACAO_TREINO = Decimal("0.6")
 # Para considerar a vantagem "relevante" na validação: pelo menos 10% do valor de uma ordem
 # e pelo menos 10 execuções. É um filtro grosseiro contra sorte, não um teste estatístico.
@@ -37,11 +44,23 @@ def vantagem(r: BacktestReport) -> Decimal:
 
 
 def _configs(base: StrategyConfig):
-    for tf, (fast, slow), tipo in itertools.product(TIMEFRAMES_TESTADOS, MEDIAS, TIPOS_ORDEM):
+    for tf, (fast, slow), tipo in itertools.product(TENDENCIA_TIMEFRAMES, MEDIAS, TIPOS_ORDEM):
         yield dataclasses.replace(
-            base, timeframe=tf, fast=fast, slow=slow,
+            base, kind="tendencia", timeframe=tf, fast=fast, slow=slow,
             fees=dataclasses.replace(base.fees, order_type=tipo),
         )
+    for tf, janela, queda, tipo in itertools.product(SWING_TIMEFRAMES, SWING_JANELAS, SWING_QUEDAS, TIPOS_ORDEM):
+        yield dataclasses.replace(
+            base, kind="swing", timeframe=tf, fast=1, slow=janela,
+            entry_drop_pct=queda, stop_loss_pct=SWING_STOP,
+            fees=dataclasses.replace(base.fees, order_type=tipo),
+        )
+
+
+def nome(cfg: StrategyConfig) -> str:
+    if cfg.kind == "swing":
+        return f"swing {cfg.timeframe} média {cfg.slow} queda {cfg.entry_drop_pct}% {cfg.fees.order_type}"
+    return f"tendência {cfg.timeframe} médias {cfg.fast}/{cfg.slow} {cfg.fees.order_type}"
 
 
 def run_estudo(
@@ -63,33 +82,41 @@ def run_estudo(
     return linhas, _texto(linhas)
 
 
+def _conclusao(cfg, v_rep) -> str:
+    v = vantagem(v_rep)
+    minimo = cfg.order_brl * MARGEM_MINIMA
+    if v >= minimo and v_rep.execucoes >= MIN_EXECUCOES:
+        return ("manteve vantagem relevante em dados que não viu. "
+                "Candidata a paper trading ao vivo (ainda não prova nada sozinha).")
+    if v > 0:
+        return (f"vantagem pequena demais (menos de R$ {minimo:.2f}) ou com poucas operações "
+                f"({v_rep.execucoes}) para separar de sorte. Não há evidência de que funcione.")
+    return "perdeu para segurar o mesmo valor na validação. Não há evidência de que funcione."
+
+
 def _texto(linhas) -> str:
     q = lambda d: f"{d:+.2f}"  # noqa: E731
     if not linhas:
         return "Dados insuficientes para o estudo."
     out = [
         f"Treino: {linhas[0][1].periodo} | Validação: {linhas[0][2].periodo}",
-        "Vantagem = resultado da estratégia menos o de comprar o mesmo valor e segurar (R$).",
+        "Vantagem = resultado da estratégia (já sem as taxas) menos o de comprar o mesmo valor e segurar (R$).",
         "",
         f"{'configuração':<46} {'treino':>9} {'validação':>10} {'ops':>4} {'taxas':>7}",
     ]
     for cfg, t, v in linhas:
-        nome = f"{cfg.timeframe} médias {cfg.fast}/{cfg.slow} {cfg.fees.order_type}"
-        out.append(f"{nome:<46} {q(vantagem(t)):>9} {q(vantagem(v)):>10} {v.execucoes:>4} {v.taxas_pagas:>7.2f}")
-    melhor_cfg, melhor_t, melhor_v = linhas[0]
-    out += [
-        "",
-        f"Melhor no treino: {melhor_t.estrategia}",
-        f"  treino: vantagem R$ {q(vantagem(melhor_t))} | validação: vantagem R$ {q(vantagem(melhor_v))}",
-    ]
-    v = vantagem(melhor_v)
-    minimo = melhor_cfg.order_brl * MARGEM_MINIMA
-    if v >= minimo and melhor_v.execucoes >= MIN_EXECUCOES:
-        out.append("  Conclusão: manteve vantagem relevante em dados que não viu. "
-                   "Candidata a paper trading ao vivo (ainda não prova nada sozinha).")
-    elif v > 0:
-        out.append(f"  Conclusão: vantagem pequena demais (menos de R$ {minimo:.2f}) ou com poucas operações "
-                   f"({melhor_v.execucoes}) para separar de sorte. Não há evidência de que funcione.")
-    else:
-        out.append("  Conclusão: perdeu a vantagem na validação. Não há evidência de que funcione.")
+        out.append(f"{nome(cfg):<46} {q(vantagem(t)):>9} {q(vantagem(v)):>10} {v.execucoes:>4} {v.taxas_pagas:>7.2f}")
+    out.append("")
+    out.append("LADO A LADO (melhor de cada tipo escolhida no treino, conferida na validação):")
+    for kind, titulo in (("tendencia", "Conservadora (tendência)"), ("swing", "Trade ativo (swing)")):
+        fam = [x for x in linhas if x[0].kind == kind]
+        if not fam:
+            continue
+        cfg, t, v = fam[0]
+        out += [
+            f"- {titulo}: {t.estrategia}",
+            f"    validação: resultado R$ {q(v.resultado_brl)} | segurar o mesmo valor R$ {q(v.segurar_mesmo_valor_brl)}"
+            f" | vantagem R$ {q(vantagem(v))} | {v.execucoes} execuções | taxas R$ {v.taxas_pagas:.2f}",
+            f"    {_conclusao(cfg, v)}",
+        ]
     return "\n".join(out)

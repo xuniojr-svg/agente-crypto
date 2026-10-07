@@ -62,6 +62,16 @@ class StrategyConfig:
     order_brl: Decimal
     fees: FeeModel
     initial_cash_brl: Decimal
+    # "tendencia": segue a tendência com duas médias (fast/slow), opera pouco.
+    # "swing": compra quando o preço cai entry_drop_pct abaixo da média de `slow` candles
+    #          e vende quando ele volta à média; stop_loss_pct limita a perda de cada operação.
+    kind: str = "tendencia"
+    entry_drop_pct: Decimal = Decimal("3")
+    stop_loss_pct: Decimal = Decimal("5")
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("tendencia", "swing"):
+            raise ValueError("kind deve ser 'tendencia' ou 'swing'")
 
 
 def _d(v) -> Decimal:
@@ -106,4 +116,7 @@ def load_strategy_config(path: str | Path) -> StrategyConfig:
             order_type=f.get("order_type", "taker"),
         ),
         initial_cash_brl=_d(raw["initial_cash_brl"]),
+        kind=raw.get("kind", "tendencia"),
+        entry_drop_pct=_d(raw.get("entry_drop_pct", "3")),
+        stop_loss_pct=_d(raw.get("stop_loss_pct", "5")),
     )

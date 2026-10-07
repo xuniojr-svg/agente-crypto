@@ -5,6 +5,8 @@
   agente-crypto backtest --sintetico         roda sobre dados aleatórios (sem rede)
   agente-crypto estudo                       compara configurações (treino x validação)
   agente-crypto verificar dados/backtest/backtest.sqlite
+  agente-crypto ao-vivo                      robô ao vivo SIMULADO (preços reais, ordens de mentira)
+  agente-crypto situacao                     mostra como está o robô ao vivo
   agente-crypto kill "motivo"                liga o kill switch
 """
 
@@ -18,6 +20,7 @@ from .config import load_risk_limits, load_strategy_config
 from .data import fetch_mb_candles, load_csv, resample, save_csv, synthetic_candles
 from .estudo import run_estudo
 from .killswitch import KillSwitch
+from .live import LivePaper
 from .ledger import Ledger
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
 
     v = sub.add_parser("verificar")
     v.add_argument("db")
+
+    av = sub.add_parser("ao-vivo")
+    av.add_argument("--intervalo", type=int, default=60, help="segundos entre leituras do preço")
+
+    sub.add_parser("situacao")
 
     k = sub.add_parser("kill")
     k.add_argument("motivo", nargs="?", default="acionado manualmente")
@@ -77,8 +85,19 @@ def main(argv: list[str] | None = None) -> int:
         ok, seq = Ledger(a.db).verify_chain()
         print("cadeia íntegra" if ok else f"ADULTERAÇÃO detectada no evento {seq}")
         return 0 if ok else 1
+    elif a.cmd in ("ao-vivo", "situacao"):
+        limits = load_risk_limits(CONFIG / "risk_limits.yaml")
+        robo = LivePaper(cfg, limits, DADOS / "ao_vivo")
+        if a.cmd == "situacao":
+            print(robo.situacao())
+        else:
+            try:
+                robo.run(intervalo=a.intervalo)
+            except KeyboardInterrupt:
+                print("\nparado. Para ver o resultado: agente-crypto situacao")
     elif a.cmd == "kill":
         KillSwitch(DADOS / "KILL").activate(a.motivo)
+        KillSwitch(DADOS / "ao_vivo" / "KILL").activate(a.motivo)
         print("kill switch ligado")
     return 0
 

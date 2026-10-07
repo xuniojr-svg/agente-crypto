@@ -11,11 +11,13 @@ cd codigo
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest                                  # 42 testes
+pytest                                  # 47 testes
 agente-crypto backtest --sintetico      # roda sem internet, com preços aleatórios
 agente-crypto baixar --dias 180         # baixa candles reais de BTC/BRL do Mercado Bitcoin (API pública)
 agente-crypto backtest                  # roda a estratégia de config/strategy.yaml sobre os dados
 agente-crypto estudo                    # compara 32 configurações (16 conservadoras, 16 de swing) com treino e validação
+caffeinate -i agente-crypto ao-vivo     # robô ao vivo SIMULADO; caffeinate impede o Mac de dormir
+agente-crypto situacao                  # mostra patrimônio simulado, posição e execuções
 agente-crypto verificar dados/backtest/backtest.sqlite   # confere se a auditoria foi adulterada
 agente-crypto kill "motivo"             # liga o kill switch
 ```
@@ -66,6 +68,15 @@ dados (MB público) -> estratégia -> OrderIntent -> MOTOR DE RISCO -> ApprovedO
 
 O `estudo` testa as duas famílias e mostra, lado a lado, a melhor de cada uma (escolhida no treino) e como ela se saiu na validação, já descontando as taxas.
 
+## Robô ao vivo (simulado)
+
+`agente-crypto ao-vivo` lê o preço real do Mercado Bitcoin a cada minuto (API pública, sem conta) e roda a estratégia de `config/strategy.yaml` a cada candle fechado (com candles de 1 dia, uma decisão por dia, logo depois das 21h de Brasília). As ordens vão para a exchange simulada: nenhuma ordem real é enviada.
+
+- Tudo fica em `dados/ao_vivo/ao_vivo.sqlite`, com a mesma auditoria do backtest.
+- Pode parar (Ctrl+C) e ligar de novo: a carteira é refeita a partir das execuções gravadas.
+- `agente-crypto kill "motivo"` para o robô; apagar `dados/ao_vivo/KILL` libera de novo.
+- Se a internet cair, ele registra o erro e tenta de novo no minuto seguinte.
+
 ## Como ler o backtest
 
 - **Comparação justa:** o robô aplica só o valor de uma ordem (R$500), então ele é comparado com comprar esses mesmos R$500 e segurar, e não com aplicar o patrimônio todo.
@@ -75,7 +86,7 @@ O `estudo` testa as duas famílias e mostra, lado a lado, a melhor de cada uma (
 ## Próximos passos da Fase 1
 
 1. Rodar o estudo com mais história (2 a 3 anos) para ter mais operações na validação.
-2. Modo paper ao vivo: o mesmo motor, alimentado pelo ticker público do MB a cada minuto.
+2. ~~Modo paper ao vivo~~ (pronto: `agente-crypto ao-vivo`). Deixar rodando algumas semanas.
 3. Painel simples com patrimônio, posições e log de decisões.
 4. Opcional: um LLM como analista de contexto, que só gera texto e sugestões e nunca uma ordem.
 5. Adaptador de testnet (OKX Demo ou Binance Testnet) para testar a integração real com uma API.

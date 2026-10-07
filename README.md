@@ -4,7 +4,7 @@ Nesta fase não há dinheiro real, conta em exchange nem chave de API. O sistema
 
 ## Como rodar
 
-Você precisa do Python 3.11 ou mais novo.
+Você precisa do Python 3.9 ou mais novo (o que já vem no macOS serve).
 
 ```bash
 cd codigo

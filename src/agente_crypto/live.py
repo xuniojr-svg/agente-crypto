@@ -14,6 +14,7 @@ Ordens que estavam no livro quando o programa parou são descartadas.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -52,6 +53,27 @@ def _restore(ledger: Ledger, cfg: StrategyConfig, now: datetime) -> Portfolio:
     return portfolio
 
 
+class _PrecoAtual:
+    """Envolve a estratégia: o sinal vem dos candles fechados, mas o preço limite é
+    recalculado sobre o preço atual (mantendo a mesma folga que a estratégia usou).
+    Sem isso, rodando horas depois do fechamento, o limite fica longe do mercado e o
+    motor de risco recusa a ordem (desvio acima de 0,5%)."""
+
+    def __init__(self, strategy, preco: Callable[[], Decimal]):
+        self.inner, self.preco = strategy, preco
+
+    @property
+    def warmup(self) -> int:
+        return self.inner.warmup
+
+    def decide(self, candles, portfolio):
+        intent = self.inner.decide(candles, portfolio)
+        if intent is None:
+            return None
+        fator = self.preco() / candles[-1].close
+        return dataclasses.replace(intent, limit_price=(intent.limit_price * fator).quantize(Decimal("0.01")))
+
+
 class LivePaper:
     def __init__(
         self,
@@ -73,7 +95,8 @@ class LivePaper:
         balances = {"BRL": self.portfolio.cash_brl}
         balances.update({a: p.quantity for a, p in self.portfolio.positions.items() if p.quantity > 0})
         self.exchange = PaperExchange(cfg.fees, balances)
-        self.strategy = make_strategy(cfg)
+        self._snap: Optional[MarketSnapshot] = None
+        self.strategy = _PrecoAtual(make_strategy(cfg), lambda: self._snap.last)
         self.engine = TradingEngine(self.strategy, limits, self.exchange, self.ledger, self.kill, self.portfolio)
         passos = self.ledger.events("candle_processado")
         self.last_candle: Optional[datetime] = (
@@ -88,7 +111,7 @@ class LivePaper:
     def tick(self) -> str:
         """Uma volta do laço. Devolve uma linha de log."""
         now = self.clock()
-        snap = self.fetch_ticker(self.cfg.symbol)
+        snap = self._snap = self.fetch_ticker(self.cfg.symbol)
         self.exchange.update_market(snap)
         asset = base_asset(self.cfg.symbol)
 

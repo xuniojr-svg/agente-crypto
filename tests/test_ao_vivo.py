@@ -127,3 +127,19 @@ def test_rodada_diaria_recupera_dias_perdidos(tmp_path, cfg, limits):
     passos = r2.ledger.events("candle_processado")
     assert len(passos) == 2
     assert datetime.fromisoformat(passos[-1]["candle"]) == START + timedelta(days=62)
+
+
+def test_limite_segue_o_preco_atual_mesmo_rodando_tarde(tmp_path, cfg, limits):
+    """Rodando horas depois do fechamento, com o preço 2% acima, a ordem não é recusada."""
+    m = FakeMarket(drift=0.002)
+    real = m.fetch_ticker
+    def mais_caro(symbol):
+        s = real(symbol)
+        k = Decimal("1.02")
+        return MarketSnapshot(symbol, s.ts, s.last * k, s.bid * k, s.ask * k)
+    r = LivePaper(cfg, limits, tmp_path, fetch_candles=m.fetch_candles,
+                  fetch_ticker=mais_caro, clock=m.clock)
+    r.tick()
+    assert not r.ledger.events("risco_rejeitou")
+    intencao = r.ledger.events("intencao")[0]
+    assert Decimal(intencao["preco_limite"]) == Decimal(intencao["mercado"]["last"]).quantize(Decimal("0.01"))

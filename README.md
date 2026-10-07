@@ -11,7 +11,7 @@ cd codigo
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest                                  # 47 testes
+pytest                                  # 48 testes
 agente-crypto backtest --sintetico      # roda sem internet, com preços aleatórios
 agente-crypto baixar --dias 180         # baixa candles reais de BTC/BRL do Mercado Bitcoin (API pública)
 agente-crypto backtest                  # roda a estratégia de config/strategy.yaml sobre os dados
@@ -76,6 +76,8 @@ O `estudo` testa as duas famílias e mostra, lado a lado, a melhor de cada uma (
 - Pode parar (Ctrl+C) e ligar de novo: a carteira é refeita a partir das execuções gravadas.
 - `agente-crypto kill "motivo"` para o robô; apagar `dados/ao_vivo/KILL` libera de novo.
 - Se a internet cair, ele registra o erro e tenta de novo no minuto seguinte.
+
+**Sem deixar o computador ligado:** como a estratégia é diária, o GitHub roda uma rodada por dia (`.github/workflows/robo-diario.yml`, às 21h25 de Brasília) com `agente-crypto ao-vivo --uma-vez --pasta robo-diario`. O resultado fica em `robo-diario/situacao.txt` e a auditoria completa em `robo-diario/ao_vivo.sqlite`. Para parar: aba Actions > "Robô diário (simulado)" > Disable workflow.
 
 ## Como ler o backtest
 

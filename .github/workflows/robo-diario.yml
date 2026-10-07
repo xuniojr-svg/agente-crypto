@@ -1,0 +1,44 @@
+# Robô ao vivo SIMULADO: uma rodada por dia nos computadores do GitHub.
+# Usa só a API pública do Mercado Bitcoin. Não há conta, chave nem ordem real.
+# O estado (auditoria SQLite e situacao.txt) fica salvo na pasta robo-diario/.
+# Para parar: Actions > Robô diário (simulado) > "Disable workflow".
+name: Robô diário (simulado)
+
+on:
+  schedule:
+    - cron: "25 0 * * *"   # 21h25 em Brasília, logo depois do fechamento do candle diário
+    - cron: "25 6 * * *"   # reserva: se a primeira falhar, esta recupera (senão não faz nada)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: robo-diario
+  cancel-in-progress: false
+
+jobs:
+  rodada:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Rodada do robô
+        run: agente-crypto ao-vivo --uma-vez --pasta robo-diario
+      - name: Situação
+        if: always()
+        run: |
+          agente-crypto situacao --pasta robo-diario | tee robo-diario/situacao.txt
+          cat robo-diario/situacao.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Salvar no repositório
+        if: always()
+        run: |
+          git config user.name "robo-diario"
+          git config user.email "robo-diario@users.noreply.github.com"
+          git add robo-diario
+          git diff --cached --quiet || git commit -m "Robô diário: rodada de $(date -u +%F)"
+          git push

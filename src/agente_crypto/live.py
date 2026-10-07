@@ -116,19 +116,23 @@ class LivePaper:
         return (f"{now:%d/%m %H:%M} BTC R$ {snap.last:,.0f} | patrimônio simulado R$ {eq:,.2f}"
                 f" | {asset} {self.portfolio.qty(asset)} | ordens no livro {self.exchange.open_orders()}")
 
-    def run(self, intervalo: int = 60, voltas: Optional[int] = None, log=print) -> None:
+    def run(self, intervalo: int = 60, voltas: Optional[int] = None, log=print) -> bool:
+        """Devolve True se a última volta funcionou."""
         log(f"Robô ao vivo SIMULADO ({self.cfg.name}, candles de {self.cfg.timeframe}). "
-            f"Nenhuma ordem real é enviada. Ctrl+C para parar.")
-        n = 0
+            f"Nenhuma ordem real é enviada.")
+        n, ok = 0, True
         while voltas is None or n < voltas:
             try:
                 log(self.tick())
+                ok = True
             except Exception as e:  # noqa: BLE001 - internet caiu, API fora do ar etc.
                 self.ledger.record("erro_dados", self.clock(), erro=repr(e))
                 log(f"erro ao ler dados ({e!r}); tento de novo na próxima volta")
+                ok = False
             n += 1
             if voltas is None or n < voltas:
                 time.sleep(intervalo)
+        return ok
 
     def situacao(self) -> str:
         asset = base_asset(self.cfg.symbol)

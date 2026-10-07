@@ -48,8 +48,12 @@ def main(argv: list[str] | None = None) -> int:
 
     av = sub.add_parser("ao-vivo")
     av.add_argument("--intervalo", type=int, default=60, help="segundos entre leituras do preço")
+    av.add_argument("--uma-vez", action="store_true",
+                    help="uma rodada só (para agendamento diário: GitHub Actions, cron)")
+    av.add_argument("--pasta", help="onde guardar o estado (padrão: dados/ao_vivo)")
 
-    sub.add_parser("situacao")
+    si = sub.add_parser("situacao")
+    si.add_argument("--pasta")
 
     k = sub.add_parser("kill")
     k.add_argument("motivo", nargs="?", default="acionado manualmente")
@@ -87,9 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     elif a.cmd in ("ao-vivo", "situacao"):
         limits = load_risk_limits(CONFIG / "risk_limits.yaml")
-        robo = LivePaper(cfg, limits, DADOS / "ao_vivo")
+        robo = LivePaper(cfg, limits, Path(a.pasta) if a.pasta else DADOS / "ao_vivo")
         if a.cmd == "situacao":
             print(robo.situacao())
+        elif a.uma_vez:
+            return 0 if robo.run(voltas=1) else 1
         else:
             try:
                 robo.run(intervalo=a.intervalo)

@@ -110,6 +110,20 @@ def test_erro_de_rede_nao_derruba_o_robo(tmp_path, cfg, limits):
     r = LivePaper(cfg, limits, tmp_path, fetch_candles=m.fetch_candles,
                   fetch_ticker=quebrado, clock=m.clock)
     logs = []
-    r.run(intervalo=0, voltas=2, log=logs.append)
+    assert r.run(intervalo=0, voltas=2, log=logs.append) is False
     assert len(r.ledger.events("erro_dados")) == 2
     assert "Cadeia de auditoria íntegra: sim" in r.situacao()
+
+
+def test_rodada_diaria_recupera_dias_perdidos(tmp_path, cfg, limits):
+    """Agendado uma vez por dia: se pular dias, processa o candle mais novo e segue."""
+    m = FakeMarket(drift=0.002)
+    r = robo(tmp_path, taker(cfg), limits, m)
+    assert r.run(voltas=1, log=lambda _: None)
+    r.ledger.close()
+    m.now += timedelta(days=3)  # ficou 3 dias sem rodar
+    r2 = robo(tmp_path, taker(cfg), limits, m)
+    assert r2.run(voltas=1, log=lambda _: None)
+    passos = r2.ledger.events("candle_processado")
+    assert len(passos) == 2
+    assert datetime.fromisoformat(passos[-1]["candle"]) == START + timedelta(days=62)

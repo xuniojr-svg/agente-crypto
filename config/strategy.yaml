@@ -1,0 +1,18 @@
+# Estratégia determinística de exemplo (cruzamento de médias móveis).
+# Serve para testar o encanamento, não é uma recomendação de investimento.
+name: sma_cross
+version: "0.1"
+symbol: BTC/BRL
+timeframe: 1h
+fast: 20
+slow: 60
+order_brl: "300"
+
+# Custos usados pelo simulador (Mercado Bitcoin, taxa inicial, conservador: tudo como taker)
+fees:
+  exchange: mercado_bitcoin
+  taker_pct: "0.70"
+  maker_pct: "0.30"
+  slippage_pct: "0.05"
+
+initial_cash_brl: "5000"

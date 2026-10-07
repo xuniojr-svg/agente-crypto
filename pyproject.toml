@@ -1,0 +1,23 @@
+[project]
+name = "agente-crypto"
+version = "0.1.0"
+description = "Fase 1: simulação de um agente de trading com motor de risco rígido, auditoria e livro fiscal"
+requires-python = ">=3.9"
+dependencies = ["pyyaml>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "hypothesis>=6"]
+
+[project.scripts]
+agente-crypto = "agente_crypto.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

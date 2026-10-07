@@ -1,0 +1,17 @@
+# Limites rígidos do motor de risco.
+# Só mudam editando este arquivo (versionado) e reiniciando o sistema.
+# Nenhuma IA ou estratégia consegue alterar estes valores em execução.
+
+max_order_brl: "500"            # valor máximo de uma ordem
+max_daily_buy_brl: "1000"       # soma máxima de compras por dia (UTC)
+max_daily_loss_pct: "2"         # perda diária máxima sobre o patrimônio do início do dia
+max_exposure_pct_per_asset: "30"  # % máximo do patrimônio em um único ativo
+max_open_positions: 2           # quantos ativos diferentes podem estar em carteira
+max_orders_per_hour: 4
+max_price_deviation_pct: "0.5"  # preço limite vs. último preço de mercado
+max_data_age_seconds: 300       # dados mais velhos que isso bloqueiam tudo
+max_spread_pct: "1.0"           # spread acima disso bloqueia tudo
+min_order_brl: "10"
+allowed_symbols:
+  - BTC/BRL
+  - ETH/BRL

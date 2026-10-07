@@ -129,3 +129,40 @@ def snapshot_from_candle(symbol: str, c: Candle, timeframe: str, spread_pct: Dec
         bid=(c.close * (1 - half)).quantize(Decimal("0.01")),
         ask=(c.close * (1 + half)).quantize(Decimal("0.01")),
     )
+
+
+def resample(candles: list[Candle], timeframe: str) -> list[Candle]:
+    """Agrupa candles menores (ex.: 1h) em candles maiores (4h, 1d), alinhados em UTC.
+    Um grupo incompleto no fim é descartado para não usar um candle que ainda não fechou."""
+    step = TIMEFRAMES[timeframe]
+    if not candles:
+        return []
+    src_step = int((candles[1].ts - candles[0].ts).total_seconds()) if len(candles) > 1 else step
+    if src_step == step:
+        return list(candles)
+    if step % src_step:
+        raise ValueError(f"não dá para converter {src_step}s em {timeframe}")
+    per = step // src_step
+    groups: dict[int, list[Candle]] = {}
+    for c in candles:
+        key = int(c.ts.timestamp()) // step * step
+        groups.setdefault(key, []).append(c)
+    out = []
+    for key in sorted(groups):
+        g = groups[key]
+        if len(g) < per * 0.9:  # aceita até 10% de buracos dentro do grupo
+            continue
+        out.append(
+            Candle(
+                ts=datetime.fromtimestamp(key, tz=timezone.utc),
+                open=g[0].open,
+                high=max(c.high for c in g),
+                low=min(c.low for c in g),
+                close=g[-1].close,
+                volume=sum((c.volume for c in g), Decimal(0)),
+            )
+        )
+    # descarta o último grupo se ele ainda não terminou
+    if out and len(groups[int(out[-1].ts.timestamp())]) < per:
+        out.pop()
+    return out

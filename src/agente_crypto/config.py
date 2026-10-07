@@ -42,6 +42,13 @@ class FeeModel:
     taker_pct: Decimal
     maker_pct: Decimal
     slippage_pct: Decimal
+    # "taker": executa na hora contra o livro (paga taker_pct).
+    # "maker": ordem limitada fica no livro até o próximo candle (paga maker_pct se executar).
+    order_type: str = "taker"
+
+    def __post_init__(self) -> None:
+        if self.order_type not in ("taker", "maker"):
+            raise ValueError("order_type deve ser 'taker' ou 'maker'")
 
 
 @dataclass(frozen=True)
@@ -96,6 +103,7 @@ def load_strategy_config(path: str | Path) -> StrategyConfig:
             taker_pct=_d(f["taker_pct"]),
             maker_pct=_d(f["maker_pct"]),
             slippage_pct=_d(f["slippage_pct"]),
+            order_type=f.get("order_type", "taker"),
         ),
         initial_cash_brl=_d(raw["initial_cash_brl"]),
     )

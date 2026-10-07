@@ -54,9 +54,33 @@ class TradingEngine:
         self._errors = 0
         self._killed_logged = False
 
+    def _apply_fills(self, fills, intent_id: str) -> None:
+        for f in fills:
+            realized = self.portfolio.apply_fill(f)
+            pos = self.portfolio.positions[base_asset(f.symbol)]
+            self.ledger.record(
+                "execucao", f.ts, id=intent_id, ordem=f.order_id, par=f.symbol, lado=f.side,
+                quantidade=f.quantity, preco=f.price, taxa_brl=f.fee_brl, resultado_brl=realized,
+            )
+            self.ledger.record_fiscal(f, pos.avg_cost_brl, realized)
+
+    def _reconcile(self, now: datetime) -> None:
+        diffs = reconcile(self.portfolio, self.exchange.balances())
+        if diffs:
+            self.ledger.record("divergencia", now, detalhes=diffs)
+            self.kill_switch.activate("divergência na reconciliação: " + "; ".join(diffs))
+
     def step(self, candles: Sequence[Candle], snapshot: MarketSnapshot, now: datetime) -> None:
         prices = {base_asset(snapshot.symbol): snapshot.last}
         self.portfolio.roll_day(now, prices)
+
+        # ordens passivas que executaram desde o último passo
+        poll = getattr(self.exchange, "poll_fills", None)
+        late = poll() if poll else []
+        if late:
+            for f in late:
+                self._apply_fills([f], f.order_id.rsplit("-", 1)[0])
+            self._reconcile(now)
 
         if self.kill_switch.is_active():
             if not self._killed_logged:
@@ -65,6 +89,11 @@ class TradingEngine:
                 self._killed_logged = True
             return
         self._killed_logged = False
+
+        # uma ordem por vez: enquanto houver ordem no livro, não cria outra
+        open_orders = getattr(self.exchange, "open_orders", None)
+        if open_orders and open_orders() > 0:
+            return
 
         intent = self.strategy.decide(candles, self.portfolio)
         if intent is None:
@@ -100,17 +129,7 @@ class TradingEngine:
             return
 
         if not fills:
-            self.ledger.record("nao_executada", now, id=intent.id)
-        for f in fills:
-            realized = self.portfolio.apply_fill(f)
-            pos = self.portfolio.positions[base_asset(f.symbol)]
-            self.ledger.record(
-                "execucao", f.ts, id=intent.id, ordem=f.order_id, par=f.symbol, lado=f.side,
-                quantidade=f.quantity, preco=f.price, taxa_brl=f.fee_brl, resultado_brl=realized,
-            )
-            self.ledger.record_fiscal(f, pos.avg_cost_brl, realized)
-
-        diffs = reconcile(self.portfolio, self.exchange.balances())
-        if diffs:
-            self.ledger.record("divergencia", now, detalhes=diffs)
-            self.kill_switch.activate("divergência na reconciliação: " + "; ".join(diffs))
+            pendente = bool(open_orders and open_orders() > 0)
+            self.ledger.record("ordem_no_livro" if pendente else "nao_executada", now, id=intent.id)
+        self._apply_fills(fills, intent.id)
+        self._reconcile(now)

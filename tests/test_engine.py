@@ -1,11 +1,12 @@
 """Cenários de ponta a ponta com o motor completo."""
 
+import dataclasses
 from datetime import timedelta
 from decimal import Decimal
 
 from agente_crypto.backtest import run_backtest
 from agente_crypto.data import snapshot_from_candle, synthetic_candles
-from agente_crypto.domain import Side
+from agente_crypto.domain import Candle, Side
 from agente_crypto.engine import TradingEngine
 from agente_crypto.execution.paper import PaperExchange
 from agente_crypto.killswitch import KillSwitch
@@ -85,7 +86,8 @@ def test_erros_seguidos_da_exchange_ligam_kill_switch(tmp_path, cfg, limits):
 
 
 def test_ordem_limite_nao_alcancada_nao_executa(tmp_path, cfg, limits):
-    # limite de compra abaixo do ask: não executa, mas fica registrado
+    # modo taker, limite de compra abaixo do ask: não executa, mas fica registrado
+    cfg = dataclasses.replace(cfg, fees=dataclasses.replace(cfg.fees, order_type="taker"))
     eng, ex, led, _ = make(tmp_path, cfg, limits, Fixed(intent(price="349000")))
     s = snap()
     ex.update_market(s)
@@ -120,3 +122,71 @@ def test_snapshot_do_backtest_usa_fechamento(cfg):
     c = synthetic_candles(1)[0]
     s = snapshot_from_candle("BTC/BRL", c, "1h", Decimal("0.1"))
     assert s.ts == c.ts + timedelta(hours=1) and s.last == c.close and s.bid < s.ask
+
+
+# ---- ordens maker (passivas) ----
+
+def maker_cfg(cfg):
+    return dataclasses.replace(cfg, fees=dataclasses.replace(cfg.fees, order_type="maker"))
+
+
+def candle(low, high, ts=NOW):
+    return Candle(ts, Decimal(high), Decimal(high), Decimal(low), Decimal(low), Decimal(1))
+
+
+def test_ordem_maker_executa_no_candle_seguinte_com_taxa_maker(tmp_path, cfg, limits):
+    eng, ex, led, _ = make(tmp_path, maker_cfg(cfg), limits, Fixed(intent(price="349000")))
+    s = snap()
+    ex.update_market(s)
+    eng.step([], s, NOW)
+    assert ex.open_orders() == 1 and led.events("ordem_no_livro") and not led.fiscal_rows()
+
+    ex.process_candle("BTC/BRL", candle(low="348900", high="351000", ts=NOW + timedelta(hours=1)))
+    eng.strategy = Fixed(None)
+    s2 = snap(ts=NOW + timedelta(hours=1))
+    ex.update_market(s2)
+    eng.step([], s2, s2.ts)
+    rows = led.fiscal_rows()
+    assert len(rows) == 1 and Decimal(rows[0]["preco_brl"]) == Decimal("349000.00")
+    assert Decimal(rows[0]["taxa_brl"]) == Decimal("0.90")  # 0,30% de ~R$300
+    assert not led.events("divergencia")
+
+
+def test_ordem_maker_so_executa_se_o_preco_passar_do_limite(tmp_path, cfg, limits):
+    eng, ex, led, _ = make(tmp_path, maker_cfg(cfg), limits, Fixed(intent(price="349000")))
+    s = snap()
+    ex.update_market(s)
+    eng.step([], s, NOW)
+    # encostar exatamente no limite não basta (fila de ordens); e a ordem expira
+    ex.process_candle("BTC/BRL", candle(low="349000", high="351000", ts=NOW + timedelta(hours=1)))
+    assert ex.open_orders() == 0 and ex.poll_fills() == []
+
+
+def test_nao_cria_outra_ordem_enquanto_ha_ordem_no_livro(tmp_path, cfg, limits):
+    eng, ex, led, _ = make(tmp_path, maker_cfg(cfg), limits, Fixed(intent(price="349000")))
+    s = snap()
+    ex.update_market(s)
+    eng.step([], s, NOW)
+    eng.step([], s, NOW)
+    assert len(led.events("intencao")) == 1
+
+
+def test_kill_switch_cancela_ordens_no_livro(tmp_path, cfg, limits):
+    eng, ex, led, ks = make(tmp_path, maker_cfg(cfg), limits, Fixed(intent(price="349000")))
+    s = snap()
+    ex.update_market(s)
+    eng.step([], s, NOW)
+    ks.activate("teste")
+    eng.step([], s, NOW)
+    assert ex.open_orders() == 0
+    assert led.events("kill_switch")[0]["ordens_canceladas"] == 1
+
+
+def test_backtest_com_aquecimento_so_opera_depois_do_inicio(tmp_path, cfg, limits):
+    cfg = dataclasses.replace(maker_cfg(cfg), timeframe="1h", fast=5, slow=20)
+    candles = synthetic_candles(400, seed=3)
+    rep = run_backtest(candles, cfg, limits, tmp_path, start_index=200)
+    assert rep.candles == 200
+    led = Ledger(tmp_path / "backtest.sqlite")
+    first_ts = min(e["ts"] for e in led.events())
+    assert first_ts >= (candles[200].ts + timedelta(hours=1)).isoformat()

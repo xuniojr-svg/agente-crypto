@@ -1,5 +1,5 @@
 Robô ao vivo SIMULADO desde 2026-10-07T04:22
-Patrimônio simulado: R$ 5,000.00 (começou com R$ 5,000.00, resultado R$ +0.00) pelo último fechamento R$ 419,441
+Patrimônio simulado: R$ 5,000.00 (começou com R$ 5,000.00, resultado R$ +0.00) pelo último fechamento R$ 411,686
 Posição: 0 BTC | caixa R$ 5,000.00
-Execuções: 0 | taxas R$ 0.00 | candles processados: 2
+Execuções: 0 | taxas R$ 0.00 | candles processados: 3
 Cadeia de auditoria íntegra: sim

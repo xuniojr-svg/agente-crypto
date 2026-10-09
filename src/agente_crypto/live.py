@@ -9,12 +9,13 @@ PaperExchange, a mesma do backtest. A cada `intervalo` segundos:
 
 O estado é reconstruído do ledger a cada início (as execuções gravadas são a
 fonte da verdade), então dá para parar e ligar de novo sem perder nada.
-Ordens que estavam no livro quando o programa parou são descartadas.
+As ordens que estão no livro da exchange simulada ficam em livro_paper.json.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -95,6 +96,10 @@ class LivePaper:
         balances = {"BRL": self.portfolio.cash_brl}
         balances.update({a: p.quantity for a, p in self.portfolio.positions.items() if p.quantity > 0})
         self.exchange = PaperExchange(cfg.fees, balances)
+        # o livro da exchange simulada sobrevive entre execuções (rodada diária)
+        self.livro = self.workdir / "livro_paper.json"
+        if self.livro.exists():
+            self.exchange.import_book(json.loads(self.livro.read_text()))
         self._snap: Optional[MarketSnapshot] = None
         self.strategy = _PrecoAtual(make_strategy(cfg), lambda: self._snap.last)
         self.engine = TradingEngine(self.strategy, limits, self.exchange, self.ledger, self.kill, self.portfolio)
@@ -117,6 +122,7 @@ class LivePaper:
 
         if self.kill.is_active():
             self.engine.step([], snap, now)  # cancela ordens e registra, sem decidir nada
+            self.livro.write_text(json.dumps(self.exchange.export_book(), indent=1))
             return f"{now:%d/%m %H:%M} KILL SWITCH ligado: {self.kill.reason()}"
 
         # só decide quando há um candle fechado que ainda não foi processado
@@ -135,6 +141,7 @@ class LivePaper:
                 self.ledger.record("candle_processado", now, candle=self.last_candle,
                                    fechamento=candles[-1].close)
 
+        self.livro.write_text(json.dumps(self.exchange.export_book(), indent=1))
         eq = self.portfolio.equity({asset: snap.last})
         return (f"{now:%d/%m %H:%M} BTC R$ {snap.last:,.0f} | patrimônio simulado R$ {eq:,.2f}"
                 f" | {asset} {self.portfolio.qty(asset)} | ordens no livro {self.exchange.open_orders()}")
@@ -170,6 +177,8 @@ class LivePaper:
         linhas.append(f"Posição: {self.portfolio.qty(asset)} {asset} | caixa R$ {self.portfolio.cash_brl:,.2f}")
         linhas.append(f"Execuções: {len(self.ledger.events('execucao'))} | taxas R$ {self.portfolio.fees_paid_brl:,.2f}"
                       f" | candles processados: {len(ultimo)}")
+        if self.exchange.open_orders():
+            linhas.append(f"Ordens esperando no livro: {self.exchange.open_orders()}")
         if self.kill.is_active():
             linhas.append(f"KILL SWITCH ligado: {self.kill.reason()}")
         ok, _ = self.ledger.verify_chain()

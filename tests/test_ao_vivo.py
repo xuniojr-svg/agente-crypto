@@ -143,3 +143,25 @@ def test_limite_segue_o_preco_atual_mesmo_rodando_tarde(tmp_path, cfg, limits):
     assert not r.ledger.events("risco_rejeitou")
     intencao = r.ledger.events("intencao")[0]
     assert Decimal(intencao["preco_limite"]) == Decimal(intencao["mercado"]["last"]).quantize(Decimal("0.01"))
+
+
+def test_ordem_maker_sobrevive_entre_rodadas_diarias(tmp_path, cfg, limits):
+    """No GitHub cada rodada é um processo novo: a ordem que ficou no livro
+    precisa ser conferida contra o candle do dia seguinte na próxima rodada."""
+    m = FakeMarket(drift=0.002)
+    r = robo(tmp_path, cfg, limits, m)  # maker
+    assert r.run(voltas=1, log=lambda _: None)
+    assert r.exchange.open_orders() == 1
+    limite = Decimal(r.ledger.events("intencao")[0]["preco_limite"])
+    r.ledger.close()
+
+    m.now += timedelta(days=1)
+    dia = [c for c in m.candles if m.now - timedelta(days=1) <= c.ts < m.now]
+    assert min(c.low for c in dia) < limite  # o candle do dia passou do limite
+    r2 = robo(tmp_path, cfg, limits, m)
+    assert r2.exchange.open_orders() == 1  # recarregada do livro salvo
+    assert r2.run(voltas=1, log=lambda _: None)
+    execucoes = r2.ledger.events("execucao")
+    assert len(execucoes) == 1 and Decimal(execucoes[0]["preco"]) == limite
+    assert r2.portfolio.qty("BTC") == r2.exchange.balances()["BTC"] > 0
+    assert not r2.ledger.events("divergencia")

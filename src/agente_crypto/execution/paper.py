@@ -12,6 +12,7 @@ Os saldos da exchange servem para a reconciliação com o ledger.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import asdict, dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List
 
@@ -22,6 +23,22 @@ from .base import require_approved
 CENT = Decimal("0.01")
 
 
+@dataclass(frozen=True)
+class _Aceita:
+    """Ordem que a exchange já aceitou. A partir daqui ela é estado da exchange
+    (como numa exchange real), e pode ser salva e recarregada entre execuções."""
+
+    intent_id: str
+    symbol: str
+    side: Side
+    quantity: Decimal
+    limit_price: Decimal
+
+    @classmethod
+    def de(cls, order: ApprovedOrder) -> "_Aceita":
+        return cls(order.intent.id, order.symbol, order.side, order.quantity, order.limit_price)
+
+
 class PaperExchange:
     def __init__(self, fees: FeeModel, initial_balances: Dict[str, Decimal], resting_ttl: int = 1):
         self.name = f"paper:{fees.exchange}"
@@ -29,7 +46,7 @@ class PaperExchange:
         self.resting_ttl = resting_ttl  # quantos candles uma ordem passiva espera
         self._balances: Dict[str, Decimal] = defaultdict(Decimal, initial_balances)
         self._market: Dict[str, MarketSnapshot] = {}
-        self._resting: List[list] = []  # [ordem, candles restantes]
+        self._resting: List[list] = []  # [_Aceita, candles restantes]
         self._pending_fills: List[Fill] = []
         self._seq = 0
 
@@ -47,6 +64,24 @@ class PaperExchange:
         n = len(self._resting)
         self._resting.clear()
         return n
+
+    def export_book(self) -> dict:
+        """Ordens no livro e contador, para guardar entre execuções (modo diário)."""
+        return {
+            "seq": self._seq,
+            "ordens": [
+                {**{k: str(v) for k, v in asdict(o).items()}, "side": o.side.value, "ttl": ttl}
+                for o, ttl in self._resting
+            ],
+        }
+
+    def import_book(self, book: dict) -> None:
+        self._seq = int(book.get("seq", 0))
+        self._resting = [
+            [_Aceita(o["intent_id"], o["symbol"], Side(o["side"]), Decimal(o["quantity"]),
+                     Decimal(o["limit_price"])), int(o["ttl"])]
+            for o in book.get("ordens", [])
+        ]
 
     def poll_fills(self) -> List[Fill]:
         out, self._pending_fills = self._pending_fills, []
@@ -71,7 +106,7 @@ class PaperExchange:
         self._resting = keep
 
     def place_order(self, order: ApprovedOrder) -> List[Fill]:
-        order = require_approved(order)
+        order = _Aceita.de(require_approved(order))
         snap = self._market[order.symbol]
         slip = self.fees.slippage_pct / 100
         if order.side is Side.BUY:
@@ -87,7 +122,7 @@ class PaperExchange:
             self._resting.append([order, self.resting_ttl])
         return []
 
-    def _settle(self, order: ApprovedOrder, price: Decimal, fee_pct: Decimal, ts) -> Fill | None:
+    def _settle(self, order: _Aceita, price: Decimal, fee_pct: Decimal, ts) -> Fill | None:
         qty = order.quantity
         gross = qty * price
         fee = (gross * fee_pct / 100).quantize(CENT, rounding=ROUND_HALF_UP)
@@ -104,7 +139,7 @@ class PaperExchange:
             self._balances[quote] += gross - fee
         self._seq += 1
         return Fill(
-            order_id=f"{order.intent.id}-{self._seq}",
+            order_id=f"{order.intent_id}-{self._seq}",
             symbol=order.symbol,
             side=order.side,
             quantity=qty,

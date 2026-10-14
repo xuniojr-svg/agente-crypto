@@ -1,13 +1,4 @@
 {
- "seq": 1,
- "ordens": [
-  {
-   "intent_id": "9b67f04f9d9848f5b8dcfb4d73697730",
-   "symbol": "BTC/BRL",
-   "side": "sell",
-   "quantity": "0.00120627",
-   "limit_price": "407000.00",
-   "ttl": 1
-  }
- ]
+ "seq": 2,
+ "ordens": []
 }

@@ -12,6 +12,7 @@ import json
 import math
 import random
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -25,8 +26,13 @@ TIMEFRAMES = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 
 def _get_json(url: str) -> object:
     req = urllib.request.Request(url, headers={"User-Agent": "agente-crypto/0.1"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # mostra para onde a API redirecionou, para diagnosticar bloqueios
+        destino = e.headers.get("Location") if e.headers else None
+        raise RuntimeError(f"HTTP {e.code} em {url}" + (f" -> {destino}" if destino else "")) from e
 
 
 def fetch_mb_candles(symbol: str, timeframe: str, days: int) -> list[Candle]:
